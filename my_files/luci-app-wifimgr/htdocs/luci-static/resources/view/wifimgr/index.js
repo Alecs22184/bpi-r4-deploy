@@ -50,6 +50,7 @@ var _lastFormTouch  = 0;  // timestamp of last form interaction — blocks poll 
 var _pendingTxMode  = null; // user-selected TX mode not yet saved to UCI — survives re-renders
 var _signalHistory  = {}; // ifname → Array<number|null> ring buffer (last 20 samples)
 var _utilHistory    = {}; // radio_id → Array<number|null> ring buffer (last 20 samples)
+var _tpBufs        = {}; // radio_id → { rx:[], tx:[], prev:null } — survives poll re-renders
 
 // ── STATIC TAB LIST ───────────────────────────────────────────────────────────
 // Networks | Radios | Clients | Diagnostics (always visible)
@@ -289,6 +290,39 @@ function decodeMldLinks(bitmap) {
     if (bitmap & 2) bands.push('5G');
     if (bitmap & 4) bands.push('6G');
     return bands.length ? bands.join(' + ') : String(bitmap);
+}
+
+function fmtMbps(v) {
+    if (v < 0.05) return '0.0';
+    if (v >= 100)  return Math.round(v) + '';
+    if (v >= 10)   return v.toFixed(1);
+    return v.toFixed(2);
+}
+
+function drawSparkline(canvas, rxBuf, txBuf) {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    var n = Math.max(rxBuf.length, txBuf.length);
+    if (n < 2) return;
+    var maxVal = 0;
+    for (var i = 0; i < rxBuf.length; i++) if (rxBuf[i] > maxVal) maxVal = rxBuf[i];
+    for (var i = 0; i < txBuf.length; i++) if (txBuf[i] > maxVal) maxVal = txBuf[i];
+    if (maxVal === 0) return;
+    function drawLine(buf, color) {
+        if (buf.length < 2) return;
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        for (var i = 0; i < buf.length; i++) {
+            var x = (i / (n - 1)) * (w - 2) + 1;
+            var y = h - 2 - (buf[i] / maxVal) * (h - 4);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    drawLine(txBuf, '#5b9bd5');
+    drawLine(rxBuf, '#4caf50');
 }
 
 function card() {
@@ -2124,8 +2158,63 @@ function renderRadios(data) {
             if (r.pp_mode === 2) ppBitmapWrap.style.display = '';
         }
 
+        // ── Live throughput ───────────────────────────────────────────────
+        var tpIfname = null;
+        (data.ifaces || []).forEach(function(iface) {
+            if (!tpIfname && iface.device === r.id && iface.mode === 'ap' && iface.ifname)
+                tpIfname = iface.ifname;
+        });
+        if (!tpIfname) {
+            (data.mlds || []).forEach(function(mld) {
+                if (!tpIfname && mld.ifname && mld.mode === 'ap' &&
+                    Array.isArray(mld.radios) && mld.radios.indexOf(r.id) >= 0)
+                    tpIfname = mld.ifname;
+            });
+        }
+        if (!_tpBufs[r.id]) _tpBufs[r.id] = { rx: [], tx: [], prev: null };
+        var tpState = _tpBufs[r.id];
+        tpState.canvas = null;
+        var TP_MAX = 30;
+        var tpEl = sp('', 'color:#555;font-size:11px;font-family:monospace;margin-left:4px');
+        if (tpIfname) {
+            var _lt = tpState.tx.length ? tpState.tx[tpState.tx.length - 1] : null;
+            var _lr = tpState.rx.length ? tpState.rx[tpState.rx.length - 1] : null;
+            if (_lt !== null) tpEl.textContent = '↓ ' + fmtMbps(_lt) + '  ↑ ' + fmtMbps(_lr) + ' Mbit/s';
+            if (!tpState.prev) layer2.iface_stats(tpIfname).then(function(res) { if (res.ok) tpState.prev = res.data; });
+            var tpTimer = setInterval(function() {
+                if (!tpEl.isConnected) { clearInterval(tpTimer); return; }
+                layer2.iface_stats(tpIfname).then(function(res) {
+                    if (!res.ok || !tpState.prev) { if (res.ok) tpState.prev = res.data; return; }
+                    var cur = res.data, prev = tpState.prev;
+                    var dt = (cur.ts - prev.ts) / 1000;
+                    if (dt < 0.5) return;
+                    var txM = Math.max(0, (cur.tx - prev.tx) * 8 / dt / 1e6);
+                    var rxM = Math.max(0, (cur.rx - prev.rx) * 8 / dt / 1e6);
+                    tpState.tx.push(txM); if (tpState.tx.length > TP_MAX) tpState.tx.shift();
+                    tpState.rx.push(rxM); if (tpState.rx.length > TP_MAX) tpState.rx.shift();
+                    tpEl.textContent = '↓ ' + fmtMbps(txM) + '  ↑ ' + fmtMbps(rxM) + ' Mbit/s';
+                    if (tpState.canvas) drawSparkline(tpState.canvas, tpState.rx, tpState.tx);
+                    tpState.prev = cur;
+                });
+            }, 5000);
+        }
+
         var bodyFn = function() {
             var b = node('div', { style: 'margin-top:10px' });
+            if (tpIfname) {
+                var cvs = document.createElement('canvas');
+                cvs.width = 240; cvs.height = 28;
+                cvs.style.cssText = 'display:block;margin-bottom:6px;border-radius:3px;background:#0d1b2a';
+                tpState.canvas = cvs;
+                if (tpState.rx.length >= 2) drawSparkline(cvs, tpState.rx, tpState.tx);
+                b.appendChild(node('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #1a2a3a' },
+                    cvs,
+                    node('div', {},
+                        sp('↓ to clients', 'display:block;color:#5b9bd5;font-size:10px'),
+                        sp('↑ from clients', 'display:block;color:#4caf50;font-size:10px')
+                    )
+                ));
+            }
 
             // ── Channel Advisor ────────────────────────────────────────────
             var advResult = node('div', { style: 'margin-top:4px;min-height:18px' });
@@ -2258,10 +2347,11 @@ function renderRadios(data) {
             return b;
         };
 
-        var hdrEl = node('div', { style: 'display:flex;align-items:center;gap:8px' },
+        var hdrEl = node('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' },
             bandPill(r.id),
             sp('CH ' + (r.channel || '?') + ' · ' + (r.htmode || '?') + ' · TX ' + (r.txpower_actual != null ? r.txpower_actual + ' dBm' : '?'), 'color:#888;font-size:12px'),
-            statusBadge(r.disabled ? 'DOWN' : (r.up ? 'UP' : 'DOWN'))
+            statusBadge(r.disabled ? 'DOWN' : (r.up ? 'UP' : 'DOWN')),
+            tpEl
         );
 
         el.appendChild(card(collapsible('radio_' + r.id, hdrEl, bodyFn, true)));

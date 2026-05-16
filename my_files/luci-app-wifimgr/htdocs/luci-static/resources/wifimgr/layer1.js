@@ -694,6 +694,23 @@ async function wpa_scan_results(ifname) {
 
 // --- GROUP 6: sysfs functions (read-only, no mutex) ---
 
+async function iface_stats(ifname) {
+    try {
+        const base = '/sys/class/net/' + ifname + '/statistics/';
+        const [rxR, txR] = await Promise.all([
+            fs.exec('/bin/cat', [base + 'rx_bytes']),
+            fs.exec('/bin/cat', [base + 'tx_bytes'])
+        ]);
+        if (rxR.code !== 0 || txR.code !== 0) return mkErr('read_failed');
+        const rx = parseInt(rxR.stdout.trim());
+        const tx = parseInt(txR.stdout.trim());
+        if (isNaN(rx) || isNaN(tx)) return mkErr('parse_failed');
+        return ok({ rx, tx, ts: Date.now() });
+    } catch(e) {
+        return mkErr('exec_failed');
+    }
+}
+
 async function sysfs_read(path) {
     try {
         const res = await fs.exec('/bin/cat', [path]);
@@ -959,6 +976,7 @@ const Layer1 = {
     wpa_bss,
     wpa_scan_results,
     // GROUP 6: sysfs
+    iface_stats,
     sysfs_read,
     iw_survey_noise,
     sysfs_thermal,

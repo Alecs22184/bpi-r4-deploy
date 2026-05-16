@@ -1341,7 +1341,9 @@ const Layer2 = {
     // system
     system_get_info, system_apply, system_apply_poll, system_all_up, system_get_logs, system_get_txpower_info,
     // relayd
-    relayd_setup, relayd_remove, relayd_get, fw_wan_add_network, repeater_fw_remove
+    relayd_setup, relayd_remove, relayd_get, fw_wan_add_network, repeater_fw_remove,
+    // passthrough
+    iface_stats: layer1.iface_stats
 };
 
 return baseclass.extend(Layer2);
