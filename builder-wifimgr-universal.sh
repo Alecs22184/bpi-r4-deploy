@@ -80,6 +80,15 @@ chmod +x files/etc/init.d/mtk-led-fix
 \cp ../my_files/etc-files/uci-defaults/95-mtk-led-fix-enable files/etc/uci-defaults/
 chmod +x files/etc/uci-defaults/95-mtk-led-fix-enable
 
+# SD auto-expand: grow production + fitrw f2fs to fill the SD card on first boot (SD-only, guarded)
+mkdir -p files/lib/preinit
+\cp ../my_files/etc-files/lib/preinit/19-expand-fit-rootfs files/lib/preinit/
+chmod +x files/lib/preinit/19-expand-fit-rootfs
+
+# NVMe /data: mount the LABEL=data partition (NVMe installs only) at /data on first boot
+\cp ../my_files/etc-files/uci-defaults/96-data-mount files/etc/uci-defaults/
+chmod +x files/etc/uci-defaults/96-data-mount
+
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
