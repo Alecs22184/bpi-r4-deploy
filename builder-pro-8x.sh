@@ -99,5 +99,11 @@ echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-emmc-comb-4bg=y" >> .config
 echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-sdmmc-comb-4bg=y" >> .config
 echo "CONFIG_PACKAGE_trusted-firmware-a-mt7988-spim-nand-ubi-comb-4bg=y" >> .config
 
-
+# --- Пакеты для 5G-модема Fibocom ---
+echo "CONFIG_PACKAGE_kmod-mtk-t7xx=y" >> .config
+echo "CONFIG_PACKAGE_modemmanager=y" >> .config
+echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
+echo "CONFIG_PACKAGE_pciutils=y" >> .config
+echo "CONFIG_PACKAGE_usbutils=y" >> .config
+# ------------------------------------
 bash ../mtk-openwrt-feeds/autobuild/unified/autobuild.sh filogic-mac80211-mt798x_rfb-wifi7_nic build
